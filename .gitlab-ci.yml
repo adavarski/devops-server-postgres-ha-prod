@@ -1,0 +1,83 @@
+image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/infrastructure
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/default
+  DOCKER_TLS_CERTDIR: ""
+
+
+before_script:
+  - cd ${TF_ROOT}
+  - echo "Working Directory is $TF_ROOT"
+
+stages:
+  - validate
+  - plan
+  - apply
+  - configure
+  - destroy
+
+
+validate:terraform:
+  stage: validate
+  script:
+    - gitlab-terraform init
+
+
+plan:terraform:
+  stage: plan
+  script:
+    - gitlab-terraform plan -var hcloud_token=${HETZNER_API_TOKEN_PROD}
+    - gitlab-terraform plan-json -var hcloud_token=${HETZNER_API_TOKEN_PROD} 
+  artifacts:
+    name: plan
+    paths:
+      - ${TF_ROOT}/plan.cache
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+
+apply:terraform:
+  stage: apply
+  script:
+    - gitlab-terraform apply
+  dependencies:
+    - plan:terraform
+  artifacts:
+    name: inventory
+    paths:
+      - ${CI_PROJECT_DIR}/inventory
+  allow_failure: false
+  
+
+
+configure:ansible:
+  stage: configure
+  dependencies:
+    - apply:terraform
+  image: gitlab.devops.davar.com:2053/root/docker-ansible:latest
+  script:
+    - cd ${CI_PROJECT_DIR}
+    - cat ${CI_PROJECT_DIR}/inventory/* > ${CI_PROJECT_DIR}/inventory.ini
+    - mkdir -p ~/.ssh  
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 400 ~/.ssh/id_rsa
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+    - export ANSIBLE_HOST_KEY_CHECKING=False
+    - ansible-playbook --private-key ~/.ssh/id_rsa -u root -i ${CI_PROJECT_DIR}/inventory.ini ./postgresql_cluster/deploy_pgcluster.yml
+  allow_failure: true
+
+
+destroy:terraform:
+  stage: destroy
+  script:
+    - gitlab-terraform destroy -var hcloud_token=${HETZNER_API_TOKEN_PROD}
+  dependencies:
+    - plan:terraform
+  artifacts:
+    name: inventory
+    paths:
+      - ${CI_PROJECT_DIR}/inventory
+  when: manual
+  allow_failure: true
+   
+
