@@ -1,3 +1,44 @@
+# GitLab devops server postgres-ha-prod repo (GitLab CI/CD pipelines)
+
+Notes: GitLab devops server use self-signed certificate, so some hacks/workorounds
+```
+GitLab CI/CD pipelines (add this):
+
+### Terraform
+
+terraform {
+  backend "http" {
+     skip_cert_verification = true
+  }
+}
+
+### Ansible 
+
+Add private key variable SSH_PRIVATE_KEY to gitlab (individual project or group)
+
+# Paste the PRIVATE key into a gitlab variable (example: SSH_PRIVATE_KEY). Pay attention to the linebreak at the end when pasting !!!
+
+configure:ansible:
+  stage: configure
+  dependencies:
+    - apply:terraform
+  image: gitlab.devops.davar.com:2053/root/docker-ansible:latest
+  script:
+    - cd ${CI_PROJECT_DIR}
+    - cat ${CI_PROJECT_DIR}/inventory/* > ${CI_PROJECT_DIR}/inventory.ini
+    - mkdir -p ~/.ssh  
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 400 ~/.ssh/id_rsa
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+    - export ANSIBLE_HOST_KEY_CHECKING=False
+    - ansible-playbook --private-key ~/.ssh/id_rsa -u root -i ${CI_PROJECT_DIR}/inventory.ini ./postgresql_cluster/deploy_pgcluster.yml
+  allow_failure: true
+  
+  
+Lines export ANSIBLE_HOST_KEY_CHECKING=False and  echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config for "Failed to connect to the host via ssh: Host key verification failed."
+  
+```
+
 ## PostgreSQL High-Availability Cluster by Patroni using ETCD cluster. Automating deployment with Terraform & Ansible.
 
 - Patroni is a cluster manager used to customize and automate deployment and maintenance of PostgreSQL HA (High Availability) clusters. It uses distributed configuration stores like etcd, Consul, ZooKeeper or Kubernetes for maximum accessibility.
